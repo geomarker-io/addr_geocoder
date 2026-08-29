@@ -1,8 +1,13 @@
 # addr_geocoder
 
-`addr_geocoder` is a ready-to-run OCI image containing the `addr-geocode`
-command, addr 2.0.0, and the complete 2025 TAF v2 bundle. Runtime downloads are
-not required.
+This repository publishes two ready-to-run OCI images containing addr 2.0.0 and
+the complete 2025 TAF v2 bundle:
+
+- `addr_geocoder` runs the `addr-geocode` command.
+- `addr_geocoder_shiny` provides a browser interface for uploading and
+  downloading files.
+
+Runtime TAF downloads are not required.
 
 The upstream `ghcr.io/geomarker-io/addr:v2.0.0` image supports `linux/amd64`
 and `linux/arm64`. The intended release tag is `v2.0.0-taf-v2-2025`.
@@ -46,9 +51,43 @@ The output matches the input format and has a deterministic name containing the
 addr version and geocoding preset. Existing output is protected unless
 `--overwrite` is supplied.
 
+## Run the Shiny app
+
+Pull the browser image:
+
+```sh
+apptainer pull addr_geocoder_shiny_v2.0.0-taf-v2-2025.sif \
+  docker://ghcr.io/geomarker-io/addr_geocoder_shiny:v2.0.0-taf-v2-2025
+```
+
+Start the app with a chosen port and default worker count:
+
+```sh
+apptainer run --cleanenv --contain \
+  --env SHINY_PORT=3838 \
+  --env ADDR_GEOCODE_WORKERS=4 \
+  addr_geocoder_shiny_v2.0.0-taf-v2-2025.sif
+```
+
+Open `http://127.0.0.1:3838` when running locally. On a cluster, choose an
+unused port and follow the cluster's instructions for tunneling that compute
+node port. A typical tunnel created from the local computer looks like:
+
+```sh
+ssh -N -L 3838:COMPUTE_NODE:3838 USER@LOGIN_HOST
+```
+
+The app accepts one CSV or Parquet file containing a column named exactly
+`address`. Choose a geocoding preset and worker count, click **Run geocoding**,
+watch the command progress, and click the generated filename to download it.
+Browser upload and download require no bind mounts. Files are temporary and are
+removed when the browser session ends.
+
 ## Versions
 
-This image pins addr 2.0.0, stow 0.3.0, and TAF v2/2025.
+Both images pin addr 2.0.0, stow 0.3.0, and TAF v2/2025. The Shiny image
+installs the latest available Shiny and processx packages during each release
+build.
 
 The TAF tree is baked into `/opt/addr-data`, root-owned, and read-only. OCI
 runtimes use the non-root `addr` user; Apptainer runs as the invoking host user.
@@ -56,5 +95,5 @@ The image is approximately 3.4 GB as stored, and converting it to a SIF requires
 additional temporary cache space.
 
 Images are built and published only when a GitHub release is published. The
-workflow pins the upstream addr image digest and verifies both architectures
-before building.
+workflow pins the upstream addr image digest and publishes both images for
+`linux/amd64` and `linux/arm64`.

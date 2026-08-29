@@ -1,0 +1,49 @@
+ARG ADDR_GEOCODER_BASE_IMAGE=ghcr.io/geomarker-io/addr_geocoder:v2.0.0-taf-v2-2025
+FROM ${ADDR_GEOCODER_BASE_IMAGE}
+
+ARG ADDR_GEOCODER_BASE_NAME=ghcr.io/geomarker-io/addr_geocoder:v2.0.0-taf-v2-2025
+ARG ADDR_GEOCODER_BASE_DIGEST
+ARG BUILD_DATE
+ARG VCS_REF
+ARG IMAGE_VERSION=v2.0.0-taf-v2-2025
+ARG SHINY_BUILD_ID=local
+ARG CRAN_REPOSITORY=https://p3m.dev/cran/__linux__/manylinux_2_28/latest
+
+LABEL org.opencontainers.image.title="addr_geocoder_shiny" \
+      org.opencontainers.image.description="Browser interface for addr-geocode with the complete 2025 TAF v2 bundle" \
+      org.opencontainers.image.source="https://github.com/geomarker-io/addr_geocoder" \
+      org.opencontainers.image.url="https://github.com/geomarker-io/addr_geocoder" \
+      org.opencontainers.image.documentation="https://github.com/geomarker-io/addr_geocoder#readme" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.base.name="${ADDR_GEOCODER_BASE_NAME}" \
+      org.opencontainers.image.base.digest="${ADDR_GEOCODER_BASE_DIGEST}" \
+      io.addr.shiny.package.policy="latest-at-build"
+
+USER root
+
+RUN echo "installing Shiny packages for build ${SHINY_BUILD_ID}" \
+    && Rscript -e "options(repos = c(CRAN = '${CRAN_REPOSITORY}')); install.packages(c('shiny', 'processx'), dependencies = NA, Ncpus = 1L); stopifnot(requireNamespace('shiny', quietly = TRUE), requireNamespace('processx', quietly = TRUE))"
+
+WORKDIR /srv/addr_geocoder_shiny
+
+COPY --chown=root:root app/app.R /srv/addr_geocoder_shiny/app.R
+
+RUN chmod 0444 /srv/addr_geocoder_shiny/app.R \
+    && Rscript -e "parse(file = '/srv/addr_geocoder_shiny/app.R'); library(shiny); library(processx)" \
+    && addr-geocode --help >/dev/null
+
+ENV SHINY_PORT=3838 \
+    ADDR_GEOCODE_WORKERS=2
+
+EXPOSE 3838
+
+USER addr
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl --fail --silent --show-error "http://127.0.0.1:${SHINY_PORT}/" >/dev/null || exit 1
+
+ENTRYPOINT ["Rscript", "/srv/addr_geocoder_shiny/app.R"]
+CMD []

@@ -31,3 +31,29 @@ The 8 GB allocation is appropriate for the included 10,000-address example
 with four workers; Apple container's default 1 GB allocation is insufficient
 for that run. Add `--overwrite` to the `addr-geocode` arguments when replacing
 an existing output file.
+
+## Shiny image
+
+Build the Shiny image from the local geocoder image:
+
+```sh
+container build \
+  -f Containerfile.shiny \
+  --build-arg ADDR_GEOCODER_BASE_IMAGE=addr_geocoder:local \
+  --build-arg ADDR_GEOCODER_BASE_NAME=addr_geocoder:local \
+  -t addr_geocoder_shiny:local \
+  .
+```
+
+Run the app without input or output mounts:
+
+```sh
+container run --rm --memory 8g \
+  --publish 127.0.0.1:3838:3838 \
+  --env SHINY_PORT=3838 \
+  --env ADDR_GEOCODE_WORKERS=4 \
+  addr_geocoder_shiny:local
+```
+
+Open `http://127.0.0.1:3838`, upload `input/addresses.csv`, choose the options,
+and click **Run geocoding**. The output is downloaded through the browser.

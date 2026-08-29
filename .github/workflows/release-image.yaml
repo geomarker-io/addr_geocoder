@@ -1,4 +1,4 @@
-name: release image
+name: release images
 
 on:
   release:
@@ -15,11 +15,12 @@ permissions:
   packages: write
 
 concurrency:
-  group: release-image-${{ github.event.release.tag_name || inputs.release_tag }}
+  group: release-images-${{ github.event.release.tag_name || inputs.release_tag }}
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/geomarker-io/addr_geocoder
+  GEOCODER_IMAGE: ghcr.io/geomarker-io/addr_geocoder
+  SHINY_IMAGE: ghcr.io/geomarker-io/addr_geocoder_shiny
 
 jobs:
   prepare:
@@ -114,8 +115,8 @@ jobs:
             exit 1
           }
 
-  build:
-    name: Build ${{ matrix.platform }}
+  build_geocoder:
+    name: Build addr_geocoder ${{ matrix.platform }}
     needs: prepare
     strategy:
       fail-fast: false
@@ -164,7 +165,7 @@ jobs:
             VCS_REF=${{ needs.prepare.outputs.revision }}
             IMAGE_VERSION=${{ needs.prepare.outputs.image_release_tag }}
           provenance: mode=max
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
+          outputs: type=image,name=${{ env.GEOCODER_IMAGE }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
 
       - name: Save image digest
         env:
@@ -172,26 +173,175 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/digests"
-          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+          mkdir -p "$RUNNER_TEMP/geocoder-digests"
+          touch "$RUNNER_TEMP/geocoder-digests/${DIGEST#sha256:}"
 
       - name: Upload image digest
         uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ matrix.artifact }}
-          path: ${{ runner.temp }}/digests/*
+          name: geocoder-digest-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/geocoder-digests/*
           if-no-files-found: error
           retention-days: 1
 
-  publish:
-    name: Publish multi-architecture index
-    needs: [prepare, build]
+  build_shiny:
+    name: Build addr_geocoder_shiny ${{ matrix.platform }}
+    needs: [prepare, build_geocoder]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            artifact: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            artifact: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.image_release_tag }}
+
+      - name: Download matching addr_geocoder digest
+        uses: actions/download-artifact@v4
+        with:
+          name: geocoder-digest-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/geocoder-digest
+
+      - name: Resolve the exact parent image
+        id: parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t digest_files < <(find "$RUNNER_TEMP/geocoder-digest" -type f)
+          if [[ "${#digest_files[@]}" -ne 1 ]]; then
+            echo "expected one addr_geocoder digest, found ${#digest_files[@]}" >&2
+            exit 1
+          fi
+          digest="sha256:$(basename "${digest_files[0]}")"
+          {
+            echo "digest=$digest"
+            echo "ref=$GEOCODER_IMAGE@$digest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Containerfile.shiny
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            ADDR_GEOCODER_BASE_IMAGE=${{ steps.parent.outputs.ref }}
+            ADDR_GEOCODER_BASE_NAME=${{ env.GEOCODER_IMAGE }}:${{ needs.prepare.outputs.image_release_tag }}
+            ADDR_GEOCODER_BASE_DIGEST=${{ steps.parent.outputs.digest }}
+            BUILD_DATE=${{ needs.prepare.outputs.created }}
+            VCS_REF=${{ needs.prepare.outputs.revision }}
+            IMAGE_VERSION=${{ needs.prepare.outputs.image_release_tag }}
+            SHINY_BUILD_ID=${{ needs.prepare.outputs.created }}
+          provenance: mode=max
+          outputs: type=image,name=${{ env.SHINY_IMAGE }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
+
+      - name: Smoke-test the image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_ref="$SHINY_IMAGE@$DIGEST"
+
+          mkdir -p "$RUNNER_TEMP/shiny-versions"
+          docker run --rm --entrypoint Rscript "$image_ref" -e \
+            "cat(as.character(packageVersion('shiny')), '\t', as.character(packageVersion('processx')), '\n', sep = '')" \
+            > "$RUNNER_TEMP/shiny-versions/${{ matrix.artifact }}.tsv"
+          cat "$RUNNER_TEMP/shiny-versions/${{ matrix.artifact }}.tsv"
+
+          docker run --rm --entrypoint Rscript "$image_ref" -e \
+            "stopifnot(packageVersion('addr') == package_version('${{ needs.prepare.outputs.addr_version }}'), packageVersion('stow') == package_version('${{ needs.prepare.outputs.stow_version }}')); addr::taf_manifest(year = '${{ needs.prepare.outputs.taf_year }}', version = '${{ needs.prepare.outputs.taf_schema }}', validate = TRUE)"
+
+          container_id="$(docker run --detach --rm \
+            --publish 127.0.0.1:3838:3838 \
+            --env SHINY_PORT=3838 \
+            --env ADDR_GEOCODE_WORKERS=2 \
+            "$image_ref")"
+          cleanup() {
+            docker stop "$container_id" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          if [[ "$(docker exec "$container_id" id -u)" == "0" ]]; then
+            echo "the Shiny image must run as a non-root user" >&2
+            exit 1
+          fi
+
+          healthy=false
+          for attempt in {1..45}; do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$container_id")"
+            if [[ "$health" == "healthy" ]]; then
+              healthy=true
+              break
+            fi
+            if [[ "$health" == "unhealthy" ]]; then
+              docker logs "$container_id"
+              exit 1
+            fi
+            sleep 2
+          done
+          if [[ "$healthy" != "true" ]]; then
+            docker logs "$container_id"
+            echo "the Shiny image did not become healthy" >&2
+            exit 1
+          fi
+
+          curl --fail --silent --show-error http://127.0.0.1:3838/ \
+            | grep -q "addr geocoder"
+
+      - name: Save image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/shiny-digests"
+          touch "$RUNNER_TEMP/shiny-digests/${DIGEST#sha256:}"
+
+      - name: Upload image digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: shiny-digest-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/shiny-digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload resolved R package versions
+        uses: actions/upload-artifact@v4
+        with:
+          name: shiny-versions-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/shiny-versions/${{ matrix.artifact }}.tsv
+          if-no-files-found: error
+          retention-days: 1
+
+  publish_geocoder:
+    name: Publish addr_geocoder multi-architecture index
+    needs: [prepare, build_geocoder]
     runs-on: ubuntu-24.04
     steps:
       - name: Download image digests
         uses: actions/download-artifact@v4
         with:
-          pattern: digest-*
+          pattern: geocoder-digest-*
           path: ${{ runner.temp }}/digests
           merge-multiple: true
 
@@ -219,12 +369,12 @@ jobs:
 
           sources=()
           for digest_file in "${digest_files[@]}"; do
-            sources+=("${IMAGE}@sha256:$(basename "$digest_file")")
+            sources+=("$GEOCODER_IMAGE@sha256:$(basename "$digest_file")")
           done
 
           docker buildx imagetools create \
             --annotation "index:org.opencontainers.image.description=addr-geocode CLI with the complete 2025 TAF v2 bundle" \
-            --tag "${IMAGE}:${RELEASE_TAG}" \
+            --tag "$GEOCODER_IMAGE:$RELEASE_TAG" \
             "${sources[@]}"
 
       - name: Verify the published index
@@ -233,7 +383,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          raw_manifest="$(docker buildx imagetools inspect --raw "${IMAGE}:${RELEASE_TAG}")"
+          raw_manifest="$(docker buildx imagetools inspect --raw "$GEOCODER_IMAGE:$RELEASE_TAG")"
           jq -e '
             (.manifests // []) as $manifests
             | any($manifests[];
@@ -245,4 +395,107 @@ jobs:
                 .platform.architecture == "arm64")
           ' <<< "$raw_manifest" >/dev/null
 
-          docker buildx imagetools inspect "${IMAGE}:${RELEASE_TAG}"
+          docker buildx imagetools inspect "$GEOCODER_IMAGE:$RELEASE_TAG"
+
+  publish_shiny:
+    name: Publish addr_geocoder_shiny multi-architecture index
+    needs: [prepare, build_shiny]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shiny-digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - name: Download resolved R package versions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shiny-versions-*
+          path: ${{ runner.temp }}/versions
+          merge-multiple: true
+
+      - name: Require matching R package versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t version_files < <(find "$RUNNER_TEMP/versions" -type f | sort)
+          if [[ "${#version_files[@]}" -ne 2 ]]; then
+            echo "expected two R package version files, found ${#version_files[@]}" >&2
+            exit 1
+          fi
+
+          mapfile -t version_rows < <(cat "${version_files[@]}" | sort -u)
+          if [[ "${#version_rows[@]}" -ne 1 ]]; then
+            echo "Shiny and processx versions differ between architectures" >&2
+            cat "${version_files[@]}" >&2
+            exit 1
+          fi
+
+          IFS=$'\t' read -r shiny_version processx_version <<< "${version_rows[0]}"
+          if [[ -z "$shiny_version" || -z "$processx_version" ]]; then
+            echo "could not parse Shiny and processx versions" >&2
+            exit 1
+          fi
+          {
+            echo "shiny_version=$shiny_version"
+            echo "processx_version=$processx_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Create the release index
+        env:
+          PROCESSX_VERSION: ${{ steps.versions.outputs.processx_version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.image_release_tag }}
+          SHINY_VERSION: ${{ steps.versions.outputs.shiny_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t digest_files < <(find "$RUNNER_TEMP/digests" -type f | sort)
+          if [[ "${#digest_files[@]}" -ne 2 ]]; then
+            echo "expected two platform digests, found ${#digest_files[@]}" >&2
+            exit 1
+          fi
+
+          sources=()
+          for digest_file in "${digest_files[@]}"; do
+            sources+=("$SHINY_IMAGE@sha256:$(basename "$digest_file")")
+          done
+
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.description=Browser interface for addr-geocode with the complete 2025 TAF v2 bundle" \
+            --annotation "index:io.addr.shiny.version=$SHINY_VERSION" \
+            --annotation "index:io.addr.processx.version=$PROCESSX_VERSION" \
+            --tag "$SHINY_IMAGE:$RELEASE_TAG" \
+            "${sources[@]}"
+
+      - name: Verify the published index
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.image_release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_manifest="$(docker buildx imagetools inspect --raw "$SHINY_IMAGE:$RELEASE_TAG")"
+          jq -e '
+            (.manifests // []) as $manifests
+            | any($manifests[];
+                .platform.os == "linux" and
+                .platform.architecture == "amd64")
+              and
+              any($manifests[];
+                .platform.os == "linux" and
+                .platform.architecture == "arm64")
+          ' <<< "$raw_manifest" >/dev/null
+
+          docker buildx imagetools inspect "$SHINY_IMAGE:$RELEASE_TAG"
