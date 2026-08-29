@@ -1,0 +1,10 @@
+.DS_Store
+.Rproj.user/
+*.Rproj
+*.log
+*.sif
+input/
+output/
+build/
+dist/
+tmp/
