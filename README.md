@@ -78,7 +78,7 @@ ssh -N -L 3838:COMPUTE_NODE:3838 USER@LOGIN_HOST
 ```
 
 The app accepts one CSV or Parquet file containing a column named exactly
-`address`. Choose a geocoding preset and worker count, click **Run geocoding**,
+`address`. Choose a geocoding preset and worker count, click **Geocode**,
 watch the command progress, and click the generated filename to download it.
 Browser upload and download require no bind mounts. Files are temporary and are
 removed when the browser session ends.
