@@ -35,7 +35,6 @@ jobs:
       created: ${{ steps.contract.outputs.created }}
       image_release_tag: ${{ steps.contract.outputs.image_release_tag }}
       revision: ${{ steps.contract.outputs.revision }}
-      stow_version: ${{ steps.contract.outputs.stow_version }}
       taf_schema: ${{ steps.contract.outputs.taf_schema }}
       taf_year: ${{ steps.contract.outputs.taf_year }}
     steps:
@@ -86,7 +85,6 @@ jobs:
             echo "created=$created"
             echo "image_release_tag=$IMAGE_RELEASE_TAG"
             echo "revision=$revision"
-            echo "stow_version=$STOW_VERSION"
             echo "taf_schema=$TAF_SCHEMA"
             echo "taf_year=$TAF_YEAR"
           } >> "$GITHUB_OUTPUT"
@@ -157,7 +155,6 @@ jobs:
             ADDR_BASE_NAME=${{ needs.prepare.outputs.addr_base_image }}
             ADDR_BASE_DIGEST=${{ needs.prepare.outputs.addr_base_digest }}
             ADDR_VERSION=${{ needs.prepare.outputs.addr_version }}
-            STOW_VERSION=${{ needs.prepare.outputs.stow_version }}
             ADDR_RELEASE_TAG=${{ needs.prepare.outputs.addr_release_tag }}
             TAF_SCHEMA=${{ needs.prepare.outputs.taf_schema }}
             TAF_YEAR=${{ needs.prepare.outputs.taf_year }}
@@ -269,7 +266,7 @@ jobs:
           cat "$RUNNER_TEMP/shiny-versions/${{ matrix.artifact }}.tsv"
 
           docker run --rm --entrypoint Rscript "$image_ref" -e \
-            "stopifnot(packageVersion('addr') == package_version('${{ needs.prepare.outputs.addr_version }}'), packageVersion('stow') == package_version('${{ needs.prepare.outputs.stow_version }}')); addr::taf_manifest(year = '${{ needs.prepare.outputs.taf_year }}', version = '${{ needs.prepare.outputs.taf_schema }}', validate = TRUE)"
+            "stopifnot(packageVersion('addr') == package_version('${{ needs.prepare.outputs.addr_version }}')); addr::taf_manifest(year = '${{ needs.prepare.outputs.taf_year }}', version = '${{ needs.prepare.outputs.taf_schema }}', validate = TRUE)"
 
           container_id="$(docker run --detach --rm \
             --publish 127.0.0.1:3838:3838 \

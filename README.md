@@ -85,7 +85,7 @@ removed when the browser session ends.
 
 ## Versions
 
-Both images pin addr 2.0.0, stow 0.3.0, and TAF v2/2025. The Shiny image
+Both images pin addr 2.0.0 and TAF v2/2025. The Shiny image
 installs the latest available Shiny and processx packages during each release
 build.
 

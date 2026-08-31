@@ -4,7 +4,6 @@ FROM ${ADDR_BASE_IMAGE}
 ARG ADDR_BASE_NAME=ghcr.io/geomarker-io/addr:v2.0.0
 ARG ADDR_BASE_DIGEST=sha256:bf43ff6d68b8889ecc517e6bf334a9af5a616cbb87c864145b6874ec040687f5
 ARG ADDR_VERSION=2.0.0
-ARG STOW_VERSION=0.3.0
 ARG ADDR_RELEASE_TAG=v2.0.0
 ARG TAF_SCHEMA=v2
 ARG TAF_YEAR=2025
@@ -24,7 +23,6 @@ LABEL org.opencontainers.image.title="addr_geocoder" \
       org.opencontainers.image.base.name="${ADDR_BASE_NAME}" \
       org.opencontainers.image.base.digest="${ADDR_BASE_DIGEST}" \
       io.addr.package.version="${ADDR_VERSION}" \
-      io.addr.stow.version="${STOW_VERSION}" \
       io.addr.taf.schema="${TAF_SCHEMA}" \
       io.addr.taf.year="${TAF_YEAR}"
 
@@ -46,7 +44,7 @@ ENV R_USER_DATA_DIR=/opt/addr-data
 # layer. The packaged installer verifies the release metadata and checksum,
 # every Parquet file, the installed manifest, a TAF lookup, and a geocode.
 RUN set -eux; \
-    Rscript -e "stopifnot(packageVersion('addr') == package_version('${ADDR_VERSION}'), packageVersion('stow') == package_version('${STOW_VERSION}'))"; \
+    Rscript -e "stopifnot(packageVersion('addr') == package_version('${ADDR_VERSION}'))"; \
     bundle_dir="$(mktemp -d)"; \
     trap 'rm -rf "$bundle_dir"' EXIT; \
     archive="addr-taf-${TAF_SCHEMA}-${TAF_YEAR}.tar.zst"; \
