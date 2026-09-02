@@ -48,12 +48,12 @@ container build \
 Run the app without input or output mounts:
 
 ```sh
-container run --rm --memory 8g \
+container run --rm --memory 8g --cpus 4 \
   --publish 127.0.0.1:3838:3838 \
   --env SHINY_PORT=3838 \
-  --env ADDR_GEOCODE_WORKERS=4 \
   addr_geocoder_shiny:local
 ```
 
 Open `http://127.0.0.1:3838`, upload `input/addresses.csv`, choose the options,
-and click **Run geocoding**. The output is downloaded through the browser.
+and click **Run geocoding**. The Workers field defaults to the four CPUs
+allocated to the container. The output is downloaded through the browser.

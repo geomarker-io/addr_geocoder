@@ -62,12 +62,13 @@ apptainer pull addr_geocoder_shiny_v2.0.0-taf-v2-2025.sif \
   docker://ghcr.io/geomarker-io/addr_geocoder_shiny:v2.0.0-taf-v2-2025
 ```
 
-Start the app with a chosen port and default worker count:
+Start the app with a chosen port. On LSF, forward the job's allocated processor
+count through Apptainer's clean environment:
 
 ```sh
 apptainer run --cleanenv --contain \
   --env SHINY_PORT=3838 \
-  --env ADDR_GEOCODE_WORKERS=4 \
+  --env LSB_DJOB_NUMPROC="$LSB_DJOB_NUMPROC" \
   addr_geocoder_shiny_v2.0.0-taf-v2-2025.sif
 ```
 
@@ -80,17 +81,19 @@ ssh -N -L 3838:COMPUTE_NODE:3838 USER@LOGIN_HOST
 ```
 
 The app accepts one CSV or Parquet file containing a column named exactly
-`address`. Choose a geocoding preset and worker count, click **Geocode**,
-watch the command progress, and click the generated filename to download it.
-Browser upload and download require no bind mounts. Files are temporary and are
-removed when the browser session ends.
+`address`. The worker count defaults to the CPUs available to the app from its
+scheduler or container allocation and remains editable. Set
+`ADDR_GEOCODE_WORKERS` only to override that detected default. Choose a
+geocoding preset, click **Geocode**, watch the command progress, and click the
+generated filename to download it. Browser upload and download require no bind
+mounts. Files are temporary and are removed when the browser session ends.
 
 ## Versions
 
 Both images pin addr 2.0.0 and TAF v2/2025. Both also set
 `ADDR_GEOCODE_RELEASE_TAG` to the image release tag so CLI and browser downloads
 use the same deterministic filename. The Shiny image installs the latest
-available Shiny and processx packages during each release build.
+available Shiny, processx, and parallelly packages during each release build.
 
 The TAF tree is baked into `/opt/addr-data`, root-owned, and read-only. OCI
 runtimes use the non-root `addr` user; Apptainer runs as the invoking host user.

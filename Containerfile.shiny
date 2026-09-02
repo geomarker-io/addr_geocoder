@@ -25,18 +25,17 @@ LABEL org.opencontainers.image.title="addr_geocoder_shiny" \
 USER root
 
 RUN echo "installing Shiny packages for build ${SHINY_BUILD_ID}" \
-    && Rscript -e "options(repos = c(CRAN = '${CRAN_REPOSITORY}')); install.packages(c('shiny', 'processx'), dependencies = NA, Ncpus = 1L); stopifnot(requireNamespace('shiny', quietly = TRUE), requireNamespace('processx', quietly = TRUE))"
+    && Rscript -e "options(repos = c(CRAN = '${CRAN_REPOSITORY}')); install.packages(c('shiny', 'processx', 'parallelly'), dependencies = NA, Ncpus = 1L); stopifnot(requireNamespace('shiny', quietly = TRUE), requireNamespace('processx', quietly = TRUE), requireNamespace('parallelly', quietly = TRUE))"
 
 WORKDIR /srv/addr_geocoder_shiny
 
 COPY --chown=root:root app/app.R /srv/addr_geocoder_shiny/app.R
 
 RUN chmod 0444 /srv/addr_geocoder_shiny/app.R \
-    && Rscript -e "parse(file = '/srv/addr_geocoder_shiny/app.R'); library(shiny); library(processx)" \
+    && Rscript -e "parse(file = '/srv/addr_geocoder_shiny/app.R'); library(shiny); library(processx); library(parallelly)" \
     && addr-geocode --help >/dev/null
 
-ENV SHINY_PORT=3838 \
-    ADDR_GEOCODE_WORKERS=2
+ENV SHINY_PORT=3838
 
 EXPOSE 3838
 

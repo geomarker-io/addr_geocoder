@@ -278,7 +278,7 @@ jobs:
 
           mkdir -p "$RUNNER_TEMP/shiny-versions"
           docker run --rm --entrypoint Rscript "$image_ref" -e \
-            "cat(as.character(packageVersion('shiny')), '\t', as.character(packageVersion('processx')), '\n', sep = '')" \
+            "cat(as.character(packageVersion('shiny')), '\t', as.character(packageVersion('processx')), '\t', as.character(packageVersion('parallelly')), '\n', sep = '')" \
             > "$RUNNER_TEMP/shiny-versions/${{ matrix.artifact }}.tsv"
           cat "$RUNNER_TEMP/shiny-versions/${{ matrix.artifact }}.tsv"
 
@@ -443,19 +443,20 @@ jobs:
 
           mapfile -t version_rows < <(cat "${version_files[@]}" | sort -u)
           if [[ "${#version_rows[@]}" -ne 1 ]]; then
-            echo "Shiny and processx versions differ between architectures" >&2
+            echo "Shiny, processx, and parallelly versions differ between architectures" >&2
             cat "${version_files[@]}" >&2
             exit 1
           fi
 
-          IFS=$'\t' read -r shiny_version processx_version <<< "${version_rows[0]}"
-          if [[ -z "$shiny_version" || -z "$processx_version" ]]; then
-            echo "could not parse Shiny and processx versions" >&2
+          IFS=$'\t' read -r shiny_version processx_version parallelly_version <<< "${version_rows[0]}"
+          if [[ -z "$shiny_version" || -z "$processx_version" || -z "$parallelly_version" ]]; then
+            echo "could not parse Shiny, processx, and parallelly versions" >&2
             exit 1
           fi
           {
             echo "shiny_version=$shiny_version"
             echo "processx_version=$processx_version"
+            echo "parallelly_version=$parallelly_version"
           } >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -470,6 +471,7 @@ jobs:
 
       - name: Create the release index
         env:
+          PARALLELLY_VERSION: ${{ steps.versions.outputs.parallelly_version }}
           PROCESSX_VERSION: ${{ steps.versions.outputs.processx_version }}
           RELEASE_TAG: ${{ needs.prepare.outputs.image_release_tag }}
           SHINY_VERSION: ${{ steps.versions.outputs.shiny_version }}
@@ -491,17 +493,19 @@ jobs:
             --annotation "index:org.opencontainers.image.description=Browser interface for addr-geocode with the complete 2025 TAF v2 bundle" \
             --annotation "index:io.addr.shiny.version=$SHINY_VERSION" \
             --annotation "index:io.addr.processx.version=$PROCESSX_VERSION" \
+            --annotation "index:io.addr.parallelly.version=$PARALLELLY_VERSION" \
             --tag "$SHINY_IMAGE:$RELEASE_TAG" \
             "${sources[@]}"
 
       - name: Verify the published index
         env:
+          PARALLELLY_VERSION: ${{ steps.versions.outputs.parallelly_version }}
           RELEASE_TAG: ${{ needs.prepare.outputs.image_release_tag }}
         shell: bash
         run: |
           set -euo pipefail
           raw_manifest="$(docker buildx imagetools inspect --raw "$SHINY_IMAGE:$RELEASE_TAG")"
-          jq -e '
+          jq -e --arg parallelly_version "$PARALLELLY_VERSION" '
             (.manifests // []) as $manifests
             | any($manifests[];
                 .platform.os == "linux" and
@@ -509,7 +513,8 @@ jobs:
               and
               any($manifests[];
                 .platform.os == "linux" and
-                .platform.architecture == "arm64")
+                .platform.architecture == "arm64") and
+              .annotations["io.addr.parallelly.version"] == $parallelly_version
           ' <<< "$raw_manifest" >/dev/null
 
           docker buildx imagetools inspect "$SHINY_IMAGE:$RELEASE_TAG"

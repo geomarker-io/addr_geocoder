@@ -23,10 +23,12 @@ parse_positive_integer <- function(value, name, maximum = .Machine$integer.max) 
   as.integer(parsed)
 }
 
-default_workers <- parse_positive_integer(
-  Sys.getenv("ADDR_GEOCODE_WORKERS", unset = "2"),
-  "ADDR_GEOCODE_WORKERS"
-)
+worker_override <- Sys.getenv("ADDR_GEOCODE_WORKERS", unset = "")
+default_workers <- if (nzchar(worker_override)) {
+  parse_positive_integer(worker_override, "ADDR_GEOCODE_WORKERS")
+} else {
+  as.integer(parallelly::availableCores())
+}
 shiny_port <- parse_positive_integer(
   shiny_port_value,
   "SHINY_PORT",
@@ -552,7 +554,10 @@ ui <- fluidPage(
       info_label(
         "workers",
         "Workers",
-        "Run ZIP groups in parallel; more workers use more memory.",
+        paste(
+          "Run ZIP groups in parallel. The default is the number of CPUs",
+          "available to this app; more workers use more memory."
+        ),
         "https://geomarker.io/addr/reference/geocode.html#details"
       ),
       numericInput(
