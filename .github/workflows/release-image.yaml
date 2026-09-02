@@ -164,6 +164,23 @@ jobs:
           provenance: mode=max
           outputs: type=image,name=${{ env.GEOCODER_IMAGE }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
 
+      - name: Verify release-tagged output filename
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.image_release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_ref="$GEOCODER_IMAGE@$DIGEST"
+          docker run --rm --entrypoint bash "$image_ref" -c '
+            set -euo pipefail
+            test "$ADDR_GEOCODE_RELEASE_TAG" = "'"$RELEASE_TAG"'"
+            work="$(mktemp -d)"
+            Rscript -e "nanoparquet::write_parquet(data.frame(id = 1:2, address = c(NA_character_, NA_character_)), \"$work/address.parquet\")"
+            addr-geocode --input "$work/address.parquet" --output-dir "$work"
+            test -f "$work/address__addr-v'"${RELEASE_TAG#v}"'__preset-default__geocoded.parquet"
+          '
+
       - name: Save image digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -266,7 +283,7 @@ jobs:
           cat "$RUNNER_TEMP/shiny-versions/${{ matrix.artifact }}.tsv"
 
           docker run --rm --entrypoint Rscript "$image_ref" -e \
-            "stopifnot(packageVersion('addr') == package_version('${{ needs.prepare.outputs.addr_version }}')); addr::taf_manifest(year = '${{ needs.prepare.outputs.taf_year }}', version = '${{ needs.prepare.outputs.taf_schema }}', validate = TRUE)"
+            "stopifnot(packageVersion('addr') == package_version('${{ needs.prepare.outputs.addr_version }}'), Sys.getenv('ADDR_GEOCODE_RELEASE_TAG') == '${{ needs.prepare.outputs.image_release_tag }}'); addr::taf_manifest(year = '${{ needs.prepare.outputs.taf_year }}', version = '${{ needs.prepare.outputs.taf_schema }}', validate = TRUE)"
 
           container_id="$(docker run --detach --rm \
             --publish 127.0.0.1:3838:3838 \

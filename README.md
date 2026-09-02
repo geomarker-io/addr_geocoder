@@ -48,8 +48,10 @@ The published image is OCI-compatible, so other OCI runtimes can consume the
 same GHCR image.
 
 The output matches the input format and has a deterministic name containing the
-addr version and geocoding preset. Existing output is protected unless
-`--overwrite` is supplied.
+image release tag and geocoding preset. For example, the current image writes
+`address__addr-v2.0.0-taf-v2-2025__preset-default__geocoded.parquet` for an
+input named `address.parquet`. Existing output is protected unless `--overwrite`
+is supplied.
 
 ## Run the Shiny app
 
@@ -85,9 +87,10 @@ removed when the browser session ends.
 
 ## Versions
 
-Both images pin addr 2.0.0 and TAF v2/2025. The Shiny image
-installs the latest available Shiny and processx packages during each release
-build.
+Both images pin addr 2.0.0 and TAF v2/2025. Both also set
+`ADDR_GEOCODE_RELEASE_TAG` to the image release tag so CLI and browser downloads
+use the same deterministic filename. The Shiny image installs the latest
+available Shiny and processx packages during each release build.
 
 The TAF tree is baked into `/opt/addr-data`, root-owned, and read-only. OCI
 runtimes use the non-root `addr` user; Apptainer runs as the invoking host user.
